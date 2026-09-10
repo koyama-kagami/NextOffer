@@ -12,3 +12,7 @@ dist/
 coverage/
 *.log
 .DS_Store
+workspace-demo/
+work/
+test-results/
+playwright-report/
