@@ -1,0 +1,14 @@
+# Personal workspace and credentials
+.env
+.env.*
+!.env.example
+.nextoffer/
+workspace/
+*.local
+
+# Dependencies and build artifacts
+node_modules/
+dist/
+coverage/
+*.log
+.DS_Store
