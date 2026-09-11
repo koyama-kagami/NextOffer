@@ -14,7 +14,7 @@
 2. 模拟面试：根据简历、JD 和选定知识资料进行文字问答及追问；保存每轮问题和回答，结束后生成复盘。语音留到文字流程稳定后接入。
 3. 岗位与日程：导入 JD，保存公司、岗位、来源、截止时间、阶段和面试日程；首版提供外部搜索入口和个人资料复制，自动采集与跨站填表作为后续适配功能。
 4. 简历：LaTeX 源码编辑、PDF 预览、AI 修改建议、差异查看、采纳、撤销与版本保存。调用本机 XeLaTeX；缺少编译器时说明安装需求，源码仍可编辑。编译禁用 shell escape，并限制执行时间。
-5. 面试记录：录入真实面试或读取模拟面试会话，总结优点、薄弱项和学习建议。面试页显示能力概览、样本数量和变化，结论关联具体回答；没有证据的维度显示尚未评估。
+5. 面试记录：录入真实面试或读取模拟面试会话，总结优点、薄弱项和学习建议。面试页显示能力概览和样本数量，结论关联具体回答；没有证据的维度显示尚未评估。
 
 ## 界面
 
@@ -27,28 +27,32 @@ TUI 不属于首个交付阶段。CLI 是稳定自动化接口，不依赖网页
 - 独立模式：用户配置自己的 OpenAI 兼容接口地址、模型名和 Key。问答、出题、评估等通过统一模型适配层调用。没有 Key 时仍可管理资料、编译简历与导入导出。
 - Agent 模式：外部 coding agent 读取文件、调用 CLI 检索上下文和保存结构化结果，使用自身模型配置，不要求再提供 NextOffer Key。
 - 从 Web UI 启动和管理外部 coding agent 的桥接不进入首版，避免混淆“供 agent 调用”和“应用内托管 agent”。
-- Key 从环境变量或本机独立配置读取，不写入业务文件、日志、导出或 Git。调用云模型会传输当前任务所需资料，界面明确显示所选提供方。
+- Key 从环境变量读取，或由网页输入后仅保存在本次服务进程内，不写入业务文件、日志、导出或 Git。调用云模型会传输当前任务所需资料，界面显示所选提供方。
 
 ## 数据
 
-以用户指定的工作区目录为事实来源：Markdown 保存知识材料、JD 和面试内容，LaTeX 保存简历，JSON 保存结构化元数据。索引可以删除后重建。
+以用户指定的工作区目录为事实来源：Markdown 保存知识材料、JD 和面试内容，LaTeX 保存简历，JSON 保存结构化元数据。首版直接检索本地段落，不需要向量数据库或云端索引。
 
 ```text
 workspace/
   profile.json
   knowledge/<id>/source.md
+  knowledge/<id>/record.json
+  knowledge/<id>/original/<filename>
   jobs/<id>/job.json
   jobs/<id>/jd.md
+  resumes/<id>/record.json
+  resumes/<id>/resume.tex
   resumes/<id>/versions/<version>/resume.tex
   interviews/<id>/session.json
   interviews/<id>/transcript.md
   interviews/<id>/review.json
-  .index/
+  .locks/
 ```
 
-记录包含 schemaVersion、稳定 ID、创建及更新时间。岗位引用简历的具体版本；面试引用岗位及使用的资料版本。日程保存带时区的时间，日期型截止时间单独保存日期，避免隐式转换。
+记录包含 schemaVersion、稳定 ID、创建及更新时间。岗位引用简历的具体版本；面试固定简历版本，并在首次 AI 调用时保存上下文快照。日程保存带时区的时间，日期型截止时间单独保存日期，避免隐式转换。
 
-JSON 写入采用临时文件与原子替换、修订号冲突检测。文件直接被 agent 修改后，下次读取进行校验；损坏记录报告路径与字段，不自动覆盖。索引更新以内容哈希识别变化。
+JSON 写入采用临时文件与原子替换、修订号冲突检测。笔记、JD、简历和面试记录直接被 agent 修改后，下次读取校验并按内容哈希识别变化。编辑简历当前源码会产生新版本，历史快照不可覆盖。个人资料通过 CLI 保存以检查修订号。
 
 能力评分统一使用技术知识、项目深度、问题分析、表达结构四个维度，未考察为 null；包含评分规则版本、引用的回答 ID。分数仅表示已有样本中的 AI 评价，不作为录用概率。
 
@@ -59,8 +63,8 @@ JSON 写入采用临时文件与原子替换、修订号冲突检测。文件直
 ```text
 packages/core/       数据校验、文件存储、岗位、简历、会话及检索
 packages/ai/         模型适配与任务提示词、结构化结果校验
-apps/cli/           命令与 JSON 输出
-apps/web/           本地服务及 React 界面
+apps/cli/           命令、JSON 输出及本机 HTTP 服务
+apps/web/           React 界面
 skills/nextoffer/   coding agent 使用说明
 ```
 
@@ -68,7 +72,7 @@ skills/nextoffer/   coding agent 使用说明
 
 ## CLI 契约
 
-命令包含 init、profile、knowledge、job、resume、interview、review 和 ui。所有业务命令支持 --workspace；机器调用使用 --json，stdout 只输出一个 JSON 结果，诊断写入 stderr。
+命令包含 init、profile、knowledge、job、resume、interview、ai、export 和 ui。所有业务命令支持 --workspace；机器调用使用 --json，stdout 只输出一个 JSON 结果，诊断写入 stderr。
 
 成功输出 {"ok":true,"data":...}；失败输出 {"ok":false,"error":{"code":"...","message":"..."}} 并返回非零退出码。首版保证 agent 可初始化工作区、添加与读取岗位、检索资料、编译简历、导入会话与复盘。
 
